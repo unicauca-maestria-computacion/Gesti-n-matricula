@@ -1,0 +1,45 @@
+package unicauca.edu.co.ms_gestion_maticula.infrastructure.adapters.persistence.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "matriculas")
+@Data 
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+public class MatriculaEntity {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+
+    @ManyToOne
+    @JoinColumn(name = "id_estudiante")
+    private EstudianteEntity estudiante;
+    
+    @ManyToOne
+    @JoinColumn(name = "id_curso")  
+    private CursoEntity curso;
+    
+    @ManyToOne
+    @JoinColumn(name = "id_periodo")   
+    private PeriodoAcademicoEntity periodo;
+    private Boolean estado;
+    private String observacion;
+    @Column(name = "estado_matricula", nullable = false, length = 20)
+    private String estadoMatricula;
+
+
+
+}

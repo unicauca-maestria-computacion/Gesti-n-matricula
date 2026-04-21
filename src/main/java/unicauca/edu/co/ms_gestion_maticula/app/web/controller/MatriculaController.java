@@ -1,0 +1,228 @@
+package unicauca.edu.co.ms_gestion_maticula.app.web.controller;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import lombok.RequiredArgsConstructor;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Asignatura;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Matricula;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.In.MatriculaService;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.CambioEstadoMasivoRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.CursoMatriculaEstudiantesRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.ListCursosRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.ListEstudianteRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaCancelRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaCursoEstudiantesRequests;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaEstadoRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaEstudianteCursosRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.AsignaturaResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.EstudianteMatriculaResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaAgrupadaResonse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaBatchResultResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaCursoResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaEstudianteCursosResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.TutorNotificacionResponse;
+import unicauca.edu.co.ms_gestion_maticula.infrastructure.utils.ApiResponse;
+
+
+
+@RestController
+@RequestMapping("/api/matricula")
+@CrossOrigin(origins = "http://localhost:4200", allowedHeaders = "*")
+@RequiredArgsConstructor
+public class MatriculaController {
+
+    private final MatriculaService matriculaService;
+    private final ModelMapper modelMapper;
+
+    /**
+     * Endpoint para matricular múltiples estudiantes en cursos
+     */
+    @PostMapping("/batch")
+    public ResponseEntity<ApiResponse> matricularEstudiantesEnCursos(
+            @Validated @RequestBody MatriculaCursoEstudiantesRequests requests) {
+        MatriculaBatchResultResponse resultado = matriculaService.matricularEstudiantesEnCursos(requests);
+        return ResponseEntity.status(HttpStatus.CREATED).body(new ApiResponse("SUCCESS", "Matrículas procesadas", resultado, 201));
+    }
+
+    /**
+     * Endpoint para matricular un estudiante en múltiples cursos
+     */
+    @PostMapping("/estudiante")
+    public ResponseEntity<ApiResponse> matricularEstudianteCursos(
+            @Validated @RequestBody MatriculaEstudianteCursosRequest request) {
+        MatriculaEstudianteCursosResponse resultado = matriculaService.matriculaEstudianteCursos(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(new ApiResponse("SUCCESS", "Matrícula del estudiante procesada", resultado, 201));
+    }
+
+    /**
+     * Endpoint para matricular estudiantes en un curso específico
+     */
+    @PostMapping("/curso")
+    public ResponseEntity<ApiResponse> matricularCursoEstudiantes(
+            @Validated @RequestBody CursoMatriculaEstudiantesRequest requests) {
+       MatriculaEstudianteCursosResponse resultado = matriculaService.matricularCursoEstudiantes(requests);
+        return ResponseEntity.status(HttpStatus.CREATED).body(new ApiResponse("SUCCESS", "Matrículas del curso procesadas", resultado, 201));
+    }
+
+    /**
+     * Endpoint para validar si un estudiante puede matricularse en un curso
+     */
+    @GetMapping("/validar")
+    public ResponseEntity<ApiResponse> validarMatriculaEstudiante(
+            @RequestParam Long estudianteId, 
+            @RequestParam Integer cursoId) {
+        Boolean esValida = matriculaService.validarMatriculaEstudiantes(estudianteId, cursoId);
+        String mensaje = esValida ? "El estudiante puede matricularse en el curso" : "El estudiante no puede matricularse en el curso";
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", mensaje, esValida, 200));
+    }
+
+    /**
+     * Endpoint para consultar matrículas de estudiantes
+     */
+    @PostMapping("/consultar")
+    public ResponseEntity<ApiResponse> consultarMatriculaEstudiantes(
+            @Validated @RequestBody ListEstudianteRequest requests) {
+        List<Matricula> matriculas = matriculaService.consultarMatriculaEstudiantes(requests);
+        List<MatriculaResponse> matriculasResponse = matriculas.stream()
+                .map(matricula -> modelMapper.map(matricula, MatriculaResponse.class))
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Matrículas encontradas", matriculasResponse, 200));
+    }
+
+    /**
+     * Endpoint para obtener matrículas de un estudiante específico
+     */
+    @GetMapping("/estudiante/{estudianteId}")
+    public ResponseEntity<ApiResponse> obtenerMatriculasPorEstudiante(@PathVariable Long estudianteId) {
+        List<EstudianteMatriculaResponse> matriculas = matriculaService.obtenerMatriculasPorEstudiante(estudianteId);
+        
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Matrículas del estudiante encontradas", matriculas, 200));
+    }
+
+    /**
+     * Endpoint para obtener asignaturas disponibles para un estudiante
+     */
+    @GetMapping("/asignaturas-disponibles/{estudianteId}")
+    public ResponseEntity<ApiResponse> obtenerAsignaturasDisponibles(@PathVariable Long estudianteId) {
+        List<Asignatura> asignaturas = matriculaService.obtenerAsignaturasDisponiblesporEstudiante(estudianteId);
+        List<AsignaturaResponse> asignaturasResponse = asignaturas.stream()
+                .map(asignatura -> modelMapper.map(asignatura, AsignaturaResponse.class))
+                .collect
+                (Collectors.toList());
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Asignaturas disponibles encontradas", asignaturasResponse, 200));
+    }
+
+    /**
+     * Endpoint para cancelar una matrícula específica
+     */
+    @PutMapping("/{matriculaId}/cancelar")
+    public ResponseEntity<ApiResponse> cancelarMatricula(
+            @PathVariable Integer matriculaId,
+            @RequestBody MatriculaCancelRequest request) {
+        String resultado = matriculaService.cancelarMatricula(matriculaId, request.getMotivo());
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", resultado, null, 200));
+    }
+
+    /**
+     * Endpoint para obtener una matrícula específica por ID
+     */
+    @GetMapping("/{matriculaId}")
+    public ResponseEntity<ApiResponse> obtenerMatriculaPorId(@PathVariable Integer matriculaId) {
+        Matricula matricula = matriculaService.obtenerMatriculaPorId(matriculaId);
+        MatriculaResponse matriculaResponse = modelMapper.map(matricula, MatriculaResponse.class);
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Matrícula encontrada", matriculaResponse, 200));
+    }
+
+    /**
+     * Endpoint para listar todas las matrículas con filtros opcionales
+     */
+    @GetMapping
+    public ResponseEntity<ApiResponse> listarMatriculas(
+            @RequestParam(required = true) Long periodoId,
+            @RequestParam(required = false) String estado,
+            @RequestParam(required = false) Long asignatura,
+            @RequestParam(required = false) Long estudiante
+        ) {
+        List<MatriculaAgrupadaResonse> matriculasResponse = matriculaService.listarMatriculas(periodoId, estado, asignatura, estudiante);
+    
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Matrículas encontradas", matriculasResponse, 200));
+    }
+
+
+    /**
+     * 
+     * Endpoint para obtener estudiantes matriculados en un curso
+     *  
+     */ 
+    @GetMapping("/estudiantes-matriculados/{cursoId}")
+    public ResponseEntity<ApiResponse> obtenerEstudiantesMatriculadosEnCurso(
+            @PathVariable Integer cursoId) {
+        List<MatriculaCursoResponse> estudiantes = matriculaService.obtenerEstudiantesMatriculadosEnCurso(cursoId);
+        
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Estudiantes matriculados encontrados", estudiantes, 200));
+    }
+
+    @PutMapping("/cambiar-estado/{id}")
+    public ResponseEntity<ApiResponse> cambiarEstadoMatricula(@PathVariable Integer id, @RequestBody MatriculaEstadoRequest request) {
+
+         MatriculaResponse matricula = matriculaService.cambiarEstadoMatricula(id,request);
+        
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Estado de matrícula cambiado", matricula, 200));
+        
+    }
+
+    /**
+     * Endpoint para generar reporte de matricula (PDF o XLSX)
+     */
+    @GetMapping("/reporte")
+    public ResponseEntity<byte[]> generarReporteMatricula(
+            @RequestParam(defaultValue = "pdf") String formato) {
+        byte[] reporte = matriculaService.generarReporteMatricula(formato);
+        boolean esExcel = formato != null && (formato.equalsIgnoreCase("xlsx") || formato.equalsIgnoreCase("excel"));
+        String extension = esExcel ? "xlsx" : "pdf";
+        MediaType mediaType = esExcel
+                ? MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                : MediaType.APPLICATION_PDF;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(mediaType);
+        headers.setContentDisposition(ContentDisposition.attachment().filename("reporte_matricula." + extension).build());
+        return new ResponseEntity<>(reporte, headers, HttpStatus.OK);
+    }
+
+    @PostMapping("/notificar-matricula-final")
+    public ResponseEntity<ApiResponse> notificarMatriculaFinal(@RequestBody  ListEstudianteRequest request) {
+        List<TutorNotificacionResponse> notificados = matriculaService.notificarMatriculasAprobadas(request);
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Notificaciones enviadas", notificados, 200));
+    }
+
+
+    
+    @PostMapping("/notificar-matricula-final/cursos")
+    public ResponseEntity<ApiResponse> notificarMatriculaFinalCursos(@RequestBody  ListCursosRequest request) {
+        List<TutorNotificacionResponse> notificados = matriculaService.notificarMatriculasFinalCursos(request);
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Notificaciones enviadas", notificados, 200));
+    }
+    
+
+    
+    @PostMapping("/cambiar-estado/masivo")
+    public ResponseEntity<ApiResponse> cambiarEstadoMatriculaPorEstudiantes( @RequestBody CambioEstadoMasivoRequest request) {
+
+         List<MatriculaResponse> matricula = matriculaService.cambiarEstadoMasivoMatricula(request);
+        
+        return ResponseEntity.ok(new ApiResponse("SUCCESS", "Estado de matrícula cambiado", matricula, 200));
+        
+    }
+}

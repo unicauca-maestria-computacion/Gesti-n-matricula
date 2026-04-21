@@ -1,0 +1,46 @@
+package unicauca.edu.co.ms_gestion_maticula.domain.model;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import unicauca.edu.co.ms_gestion_maticula.infrastructure.adapters.persistence.entity.MatriculaEntity;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Matricula {
+    private Integer id;
+    private Estudiante estudiante;
+    private Curso curso;
+    private PeriodoAcademico periodo;
+    private boolean estado;
+    private String estadoMatricula;
+    private String observacion;
+
+    public MatriculaEntity toEntity(){
+        return MatriculaEntity.builder()
+                .id(this.id)
+                .estudiante(this.estudiante.toEntity())
+                .curso(this.curso.toEntity())
+                .periodo(this.periodo.toEntity())
+                .estado(this.estado)
+                .estadoMatricula(this.estadoMatricula)
+                .observacion(this.observacion)
+                .build();
+    }
+
+    public Matricula fromEntity(MatriculaEntity entity){
+        return Matricula.builder()
+                .id(entity.getId())
+                .estudiante(entity.getEstudiante().toDomain())
+                .curso(entity.getCurso().toDomain())
+                .periodo(entity.getPeriodo().toDomain())
+                .estado(entity.getEstado())
+                .observacion(entity.getObservacion())
+                .estadoMatricula(entity.getEstadoMatricula())
+                .build();
+        }
+
+}

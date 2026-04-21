@@ -1,0 +1,1328 @@
+package unicauca.edu.co.ms_gestion_maticula.domain.service;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.lang.StackWalker.Option;
+import java.util.HashSet;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Docente;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Persona;
+
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.In.EmailService;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.out.EstudianteDocenteRepository;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.ReportCursoDto;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.ReportEstudianteCursoDto;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.TutorNotificacionResponse;
+import net.sf.jasperreports.engine.JRException;
+import net.sf.jasperreports.engine.JasperExportManager;
+import net.sf.jasperreports.engine.JasperFillManager;
+import net.sf.jasperreports.engine.JasperPrint;
+import net.sf.jasperreports.engine.data.JRBeanArrayDataSource;
+import net.sf.jasperreports.engine.data.JRBeanCollectionDataSource;
+import net.sf.jasperreports.engine.export.ooxml.JRXlsxExporter;
+import net.sf.jasperreports.export.SimpleExporterInput;
+import net.sf.jasperreports.export.SimpleOutputStreamExporterOutput;
+import net.sf.jasperreports.export.SimpleXlsxReportConfiguration;
+
+import org.modelmapper.ModelMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.stereotype.Service;
+
+import jakarta.persistence.EntityNotFoundException;
+import lombok.RequiredArgsConstructor;
+import unicauca.edu.co.ms_gestion_maticula.domain.enums.EstadoEstudianteMaestria;
+import unicauca.edu.co.ms_gestion_maticula.domain.enums.MatriculaEstado;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Asignatura;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Curso;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Estudiante;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.Matricula;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.MatriculaCurso;
+import unicauca.edu.co.ms_gestion_maticula.domain.model.PeriodoAcademico;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.CambioEstadoMasivoRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.CursoMatriculaEstudiantesRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.CursoMatriculaRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.EstudianteMatriculaRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.ListCursosRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.ListEstudianteRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaCursoEstudiantesRequests;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaEstadoRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.request.MatriculaEstudianteCursosRequest;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.In.MatriculaService;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.out.CursoRepository;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.out.MatriculaRepository;
+import unicauca.edu.co.ms_gestion_maticula.domain.ports.out.PeriodoAcademicoRepository;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.CursoResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.EstudianteMatriculaResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.EstudianteResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaAgrupadaResonse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaBatchResultResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaCursoResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaEstudianteCursosResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaNoRealizadaResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.PeriodoAcademicoResponse;
+import unicauca.edu.co.ms_gestion_maticula.domain.response.MatriculaResponse;
+
+@Service
+@RequiredArgsConstructor
+public class MatriculaServiceImpl implements MatriculaService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(MatriculaServiceImpl.class);
+
+    @Autowired
+    private final MatriculaRepository matriculaRepository;
+    @Autowired
+    private final CursoRepository cursoRepository;
+    @Autowired
+    private final PeriodoAcademicoRepository periodoAcademicoRepository;
+    @Autowired
+    private final ModelMapper modelMapper;
+    @Autowired
+    private final EstudianteDocenteRepository estudianteDocenteRepository;
+    @Autowired
+    private final EmailService emailService;
+
+    @Autowired
+    @Qualifier("messageResourceMatricula")
+    private MessageSource messageSource;
+
+   private String msg(String key, Object... args){
+        return messageSource.getMessage(key, args, LocaleContextHolder.getLocale());
+    }
+
+    
+    @Override
+    public MatriculaBatchResultResponse matricularEstudiantesEnCursos(MatriculaCursoEstudiantesRequests requests) {
+        if (requests == null || requests.getMatriculaEstudianteCursos() == null ||
+            requests.getMatriculaEstudianteCursos().isEmpty()) {
+            throw new IllegalArgumentException("Debe especificar al menos una solicitud de matrÃ­cula");
+        }
+    
+        List<MatriculaResponse> exitos = new ArrayList<>();
+        List<MatriculaNoRealizadaResponse> fallidos = new ArrayList<>();
+        // Procesar cada solicitud de matrÃ­cula
+        for (MatriculaEstudianteCursosRequest solicitud : requests.getMatriculaEstudianteCursos()) {
+            
+            for (CursoMatriculaRequest cursoRequest : solicitud.getCursos()) {
+                Integer cursoId = cursoRequest.getCursoId();
+                try {
+                validarMatriculaEstudiantes(solicitud.getEstudianteId(), cursoId);
+                Curso curso = validarYObtenerCurso(cursoId);
+                Matricula matricula = crearMatricula(solicitud.getEstudianteId(), curso, cursoRequest.getObservacion());
+                Matricula matriculaResult = matriculaRepository.save(matricula);
+                exitos.add(modelMapper.map(matriculaResult, MatriculaResponse.class));
+                } catch (Exception e) {
+                    CursoResponse cursoResponse = cursoRepository.findCursoById(cursoId)
+                            .map(curso -> modelMapper.map(curso, CursoResponse.class))
+                            .orElse(null);
+                    Estudiante estudiante =matriculaRepository.getEstudianteByIdAndEstado(solicitud.getEstudianteId(), EstadoEstudianteMaestria.ACTIVO)
+                    .orElseThrow(null);
+                    fallidos.add(MatriculaNoRealizadaResponse.builder()
+                            .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                            .curso(cursoResponse)
+                            .motivo(e.getMessage())
+                            .build());
+                }
+            }
+        }
+        return MatriculaBatchResultResponse.builder()
+                .matriculasProcesadas(exitos)
+                .matriculasNoProcesadas(fallidos)
+                .build();
+    }
+
+    @Override
+    public MatriculaEstudianteCursosResponse matriculaEstudianteCursos(MatriculaEstudianteCursosRequest request) {
+        if (request == null || request.getEstudianteId() == null) {
+            throw new IllegalArgumentException("La solicitud de matrÃ­cula es requerida");
+        }
+        // Validar periodo de matrÃ­cula
+        validarPeriodoMatricula();
+
+        Estudiante estudiante =matriculaRepository.getEstudianteByIdAndEstado(request.getEstudianteId(), EstadoEstudianteMaestria.ACTIVO)
+                .orElseThrow(() -> new EntityNotFoundException("No estÃ¡ activo o no existe el estudiante con ID: " + request.getEstudianteId()));
+
+        List<Matricula> matriculasExistentes = matriculaRepository.findByEstudianteIdAndPeriodoActivo(request.getEstudianteId());
+
+        Map<Integer, Matricula> matriculaPorCursoId = new HashMap<>();
+        for (Matricula matricula : matriculasExistentes) {
+            if (matricula.getCurso() != null && matricula.getCurso().getId() != null) {
+                matriculaPorCursoId.put(matricula.getCurso().getId(), matricula);
+            }
+        }
+
+        List<MatriculaNoRealizadaResponse> fallidos = new ArrayList<>();
+
+        Map<Integer, CursoMatriculaRequest> solicitudesPorCursoId = new HashMap<>();
+        for (CursoMatriculaRequest cursoRequest : request.getCursos()) {
+            if (cursoRequest == null || cursoRequest.getCursoId() == null) {
+                fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                        .curso(null)
+                        .motivo("El cursoId es requerido")
+                        .build());
+                continue;
+            }
+            solicitudesPorCursoId.putIfAbsent(cursoRequest.getCursoId(), cursoRequest);
+        }
+
+        List<Matricula> matriculasEliminadas = new ArrayList<>();
+        for (Matricula matricula : matriculasExistentes) {
+            
+            Integer cursoId = matricula.getCurso() != null ? matricula.getCurso().getId() : null;
+            if (cursoId != null && !solicitudesPorCursoId.containsKey(cursoId)) {
+                if (matricula.getEstadoMatricula().equals(MatriculaEstado.CANCELADA.name()) ||
+                    matricula.getEstadoMatricula().equals(MatriculaEstado.APROBADA.name()) ||
+                    matricula.getEstadoMatricula().equals(MatriculaEstado.RECHAZADA.name())) {
+                    fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                        .curso(modelMapper.map(matricula.getCurso(), CursoResponse.class))
+                        .motivo("No se puede eliminar la matrÃ­cula en estado " + matricula.getEstadoMatricula())
+                        .build());
+                    continue; 
+                }
+                matriculaRepository.deleteById(matricula.getId());
+                matriculasEliminadas.add(matricula);
+            }
+        }
+
+        List<Matricula> matriculasProcesadas = new ArrayList<>();
+        for (CursoMatriculaRequest cursoRequest : request.getCursos()) {
+            Integer cursoId = cursoRequest.getCursoId();
+            Matricula existente = matriculaPorCursoId.get(cursoId);
+            if (existente != null) {
+                
+                if (cursoRequest.getObservacion() != null &&
+                        !Objects.equals(cursoRequest.getObservacion(), existente.getObservacion())) {
+                    existente.setObservacion(cursoRequest.getObservacion());
+                    existente = matriculaRepository.update(existente);
+                    matriculasProcesadas.add(existente);
+                }else {
+                    fallidos.add(MatriculaNoRealizadaResponse.builder()
+                            .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                            .curso(modelMapper.map(existente.getCurso(), CursoResponse.class))
+                            .motivo("El estudiante ya estÃ¡ matriculado en este curso")
+                            .build());
+                }
+                
+                continue;
+            }
+
+            try {
+            validarMatriculaEstudiantes(request.getEstudianteId(), cursoId);
+            Curso curso = validarYObtenerCurso(cursoId);
+            Matricula matricula = crearMatricula(request.getEstudianteId(), curso, cursoRequest.getObservacion());
+            Matricula matriculaResult = matriculaRepository.save(matricula);
+            matriculasProcesadas.add(matriculaResult);
+            } catch (Exception e) {
+                CursoResponse cursoResponse = cursoRepository.findCursoById(cursoId)
+                        .map(curso -> modelMapper.map(curso, CursoResponse.class))
+                        .orElse(null);
+                fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                        .curso(cursoResponse)
+                        .motivo(e.getMessage())
+                        .build());
+            }
+        }
+
+        return MatriculaEstudianteCursosResponse.builder()
+                .matriculasProcesadas(toMatriculaResponse(matriculasProcesadas))
+                .matriculasNoProcesadas(fallidos)
+                .matriculasEliminadas(toMatriculaResponse(matriculasEliminadas))
+                .build();
+    }
+
+
+    @Override
+    public MatriculaEstudianteCursosResponse matricularCursoEstudiantes(CursoMatriculaEstudiantesRequest request) {
+          if (request == null || request.getCursoId() == null) {
+            throw new IllegalArgumentException("La solicitud de matrÃ­cula es requerida");
+        }
+        // Validar periodo de matrÃ­cula
+        validarPeriodoMatricula();
+
+        Curso curso = validarYObtenerCurso(request.getCursoId());
+
+        List<Matricula> matriculasExistentes = matriculaRepository.findByCursoIdAndPeriodoId(request.getCursoId(),curso.getPeriodo().getId());
+        
+        Map<Long, Matricula> matriculaPorEstudianteId = new HashMap<>();
+        for (Matricula matricula : matriculasExistentes) {
+            if (matricula.getEstudiante() != null && matricula.getEstudiante().getId() != null) {
+                matriculaPorEstudianteId.put(matricula.getEstudiante().getId(), matricula);
+            }
+        }
+
+        List<MatriculaNoRealizadaResponse> fallidos = new ArrayList<>();
+
+        Map<Long, EstudianteMatriculaRequest> solicitudesPorEstudianteId = new HashMap<>();
+        for (EstudianteMatriculaRequest estudianteRequest : request.getEstudiantes()) {
+            if (estudianteRequest == null || estudianteRequest.getEstudianteId() == null) {
+                fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(null)
+                        .curso(modelMapper.map(curso, CursoResponse.class))
+                        .motivo("El estudianteId es requerido")
+                        .build());
+                continue;
+            }
+            solicitudesPorEstudianteId.putIfAbsent(estudianteRequest.getEstudianteId(), estudianteRequest);
+        }
+
+        List<Matricula> matriculasEliminadas = new ArrayList<>();
+        for (Matricula matricula : matriculasExistentes) {
+            Long estudianteId = matricula.getEstudiante() != null ? matricula.getEstudiante().getId() : null;
+            if (estudianteId != null && !solicitudesPorEstudianteId.containsKey(estudianteId)) {
+                if (matricula.getEstadoMatricula().equals(MatriculaEstado.CANCELADA.name()) ||
+                    matricula.getEstadoMatricula().equals(MatriculaEstado.APROBADA.name()) ||
+                    matricula.getEstadoMatricula().equals(MatriculaEstado.RECHAZADA.name())) {
+                    fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(modelMapper.map(matricula.getEstudiante(), EstudianteResponse.class))
+                        .curso(modelMapper.map(matricula.getCurso(), CursoResponse.class))
+                        .motivo("No se puede eliminar la matrÃ­cula en estado " + matricula.getEstadoMatricula())
+                        .build());
+                    continue; 
+                }
+
+                matriculaRepository.deleteById(matricula.getId());
+                matriculasEliminadas.add(matricula);
+            }
+        }
+
+        List<Matricula> matriculasProcesadas = new ArrayList<>();
+        for (EstudianteMatriculaRequest estudianteRequest : request.getEstudiantes()) {
+            Long estudianteId = estudianteRequest.getEstudianteId();
+            Matricula existente = matriculaPorEstudianteId.get(estudianteId);
+            if (existente != null) {
+                
+                if (estudianteRequest.getObservacion() != null &&
+                        !Objects.equals(estudianteRequest.getObservacion(), existente.getObservacion())) {
+                    existente.setObservacion(estudianteRequest.getObservacion());
+                    existente = matriculaRepository.update(existente);
+                    matriculasProcesadas.add(existente);
+                }else {
+                    Estudiante estudiante =matriculaRepository.getEstudianteByIdAndEstado(estudianteRequest.getEstudianteId(), EstadoEstudianteMaestria.ACTIVO)
+                .orElseThrow(null);
+                    fallidos.add(MatriculaNoRealizadaResponse.builder()
+                            .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                            .curso(modelMapper.map(curso, CursoResponse.class))
+                            .motivo("El estudiante ya estÃ¡ matriculado en este curso")
+                            .build());
+                }
+                
+                continue;
+            }
+
+            try {
+            validarMatriculaEstudiantes(estudianteRequest.getEstudianteId(), curso.getId());
+            Matricula matricula = crearMatricula(estudianteRequest.getEstudianteId(), curso, estudianteRequest.getObservacion());
+            Matricula matriculaResult = matriculaRepository.save(matricula);
+            matriculasProcesadas.add(matriculaResult);
+            } catch (Exception e) {
+                Estudiante estudiante =matriculaRepository.getEstudianteByIdAndEstado(estudianteRequest.getEstudianteId(), EstadoEstudianteMaestria.ACTIVO)
+                .orElseThrow(null);
+                fallidos.add(MatriculaNoRealizadaResponse.builder()
+                        .estudiante(modelMapper.map(estudiante, EstudianteResponse.class))
+                        .curso(modelMapper.map(curso, CursoResponse.class))
+                        .motivo(e.getMessage())
+                        .build());
+            }
+        }
+
+        return MatriculaEstudianteCursosResponse.builder()
+                .matriculasProcesadas(toMatriculaResponse(matriculasProcesadas))
+                .matriculasNoProcesadas(fallidos)
+                .matriculasEliminadas(toMatriculaResponse(matriculasEliminadas))
+                .build();
+    }
+
+    @Override
+    public Boolean validarMatriculaEstudiantes(Long estudianteId, Integer cursoId) {
+        if (estudianteId == null || cursoId == null) {
+            throw new IllegalArgumentException("Los parámetros estudianteId y cursoId son requeridos");
+        }
+        // Validar que el estudiante esté activo
+       Optional<Estudiante> estudianteActivo = matriculaRepository.getEstudianteByIdAndEstado(estudianteId,EstadoEstudianteMaestria.ACTIVO);
+       if (estudianteActivo.isEmpty()) {
+            throw new EntityNotFoundException("No está activo o no existe el estudiante con ID: " + estudianteId);
+       }
+                 
+
+        // Validar periodo de matrícula
+        validarPeriodoMatricula();
+        
+        // Obtener y validar el curso
+        Curso curso = validarYObtenerCurso(cursoId);
+        
+        // Validar prerequisitos de la asignatura
+        validarPrerequisitos(estudianteId, curso.getAsignatura().getId());
+        
+        // Obtener periodo académico activo
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+        
+        // Verificar si el estudiante ya está matriculado en esta asignatura en este periodo
+        boolean yaMatriculado = matriculaRepository.existsMatriculaByEstudianteIdAndPeriodoIdAndAsignaturaId(
+                estudianteId, periodoActivo.getId(), curso.getAsignatura().getId());
+
+        
+        if (yaMatriculado) {
+            throw new IllegalArgumentException("El estudiante ya estÃ¡ matriculado en esta asignatura para el periodo actual");
+        }
+        
+        // Verificar si el estudiante ya ganÃ³ la asignatura
+        boolean asignaturaGanada = matriculaRepository.asignaturaGanada(estudianteId, curso.getAsignatura().getId());
+        if (asignaturaGanada) {
+            throw new IllegalArgumentException("El estudiante ya ganó esta asignatura");
+        }
+        
+        return true;
+    }
+
+    @Override
+    public List<Matricula> consultarMatriculaEstudiantes(ListEstudianteRequest requests) {
+        if (requests == null || requests.getEstudianteIds() == null || 
+            requests.getEstudianteIds().isEmpty()) {
+            throw new IllegalArgumentException("Debe especificar al menos un estudiante para consultar");
+        }
+        
+        List<Matricula> todasLasMatriculas = new ArrayList<>();
+        
+        // Obtener matrÃ­culas para cada estudiante especificado
+        for (Long estudianteId : requests.getEstudianteIds()) {
+            if (estudianteId != null) {
+                List<Matricula> matriculasEstudiante = matriculaRepository.findByEstudianteId(estudianteId);
+                todasLasMatriculas.addAll(matriculasEstudiante);
+            }
+        }
+        
+        return todasLasMatriculas;
+    }
+
+    @Override
+    public List<Asignatura> obtenerAsignaturasDisponiblesporEstudiante(Long estudianteId) {
+        if (estudianteId == null) {
+            throw new IllegalArgumentException("El ID del estudiante es requerido");
+        }
+        
+        
+        // Validar existencia del estudiante
+        if (!estudianteDocenteRepository.existsEstudianteActivoById(estudianteId)) {
+            throw new EntityNotFoundException("No se encuentra o no está activo el estudiante con ID: " + estudianteId);
+        }
+
+        // Validar periodo de matrícula
+        validarPeriodoMatricula();
+        
+        // Obtener periodo académico activo
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+        
+        // Obtener todas las asignaturas activas
+        List<Asignatura> todasLasAsignaturas = cursoRepository.findAsignaturasByStatus(true,null);
+        
+        // Obtener asignaturas ya matriculadas por el estudiante en el periodo actual
+        List<Asignatura> asignaturasMatriculadas = matriculaRepository.getAsignaturasMatriculadas(estudianteId, periodoActivo.getId());
+        
+        // Filtrar asignaturas disponibles
+        List<Asignatura> asignaturasDisponibles = todasLasAsignaturas.stream()
+                .filter(asignatura -> {
+                    // Verificar que no está ya matriculado
+                    boolean yaMatriculado = asignaturasMatriculadas.stream()
+                            .anyMatch(matriculada -> matriculada.getId().equals(asignatura.getId()));
+                    
+                    // Verificar que no haya ganado la asignatura
+                    boolean yaGanada = matriculaRepository.asignaturaGanada(estudianteId, asignatura.getId());
+                    
+                    return !yaMatriculado && !yaGanada;
+                })
+                .collect(Collectors.toList());
+        
+        return asignaturasDisponibles;
+    }
+
+    /**
+     * Método adicional para cancelar una matrícula específica
+     */
+    public String cancelarMatricula(Integer matriculaId, String motivoCancelacion) {
+    
+        if (matriculaId == null) {
+            throw new IllegalArgumentException("El ID de la matrícula es requerido");
+        }
+        
+        Matricula matricula = matriculaRepository.findById(matriculaId)
+                .orElseThrow(() -> new EntityNotFoundException("Matrícula no encontrada"));
+            
+    
+        matriculaRepository.findNotaFinalByMatriculaId(matriculaId)
+                .ifPresent(notaFinal -> {
+                    throw new IllegalArgumentException("No se puede cancelar la matrícula, ya tiene una nota final registrada");
+                });
+        
+        // Validar que la matrícula esté activa
+        if (!matricula.isEstado()) {
+            throw new IllegalArgumentException("Solo se pueden cancelar matrículas activas");
+        }
+
+        // Validar periodo de matrícula
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+        
+        LocalDate fechaActual = LocalDate.now();
+        if (fechaActual.isBefore(periodoActivo.getFechaInicio())) {
+            throw new IllegalArgumentException("El periodo académico aún no ha iniciado");
+        }
+        if (fechaActual.isAfter(periodoActivo.getFechaFinMatricula())) {
+            throw new IllegalArgumentException("El periodo de matrícula ha finalizado");
+        }
+        
+        // Actualizar estado y observación
+        matricula.setEstadoMatricula(MatriculaEstado.CANCELADA.name());
+        matricula.setEstado(false);
+        matricula.setObservacion("CANCELADA: " + motivoCancelacion);
+        
+        matriculaRepository.update(matricula);
+
+        return "Matrícula cancelada exitosamente";
+    }
+
+    /**
+     * Método adicional para obtener matrículas por estudiante 
+     */
+    public List<EstudianteMatriculaResponse> obtenerMatriculasPorEstudiante(Long estudianteId) {
+        if (estudianteId == null) {
+            throw new IllegalArgumentException("El ID del estudiante es requerido");
+        }
+        // Validar existencia del estudiante
+        if (!estudianteDocenteRepository.existsEstudianteActivoById(estudianteId)) {
+            throw new EntityNotFoundException("No se encuentra o no está activo el estudiante con ID: " + estudianteId);
+        }
+        
+        List<Matricula> todasLasMatriculas = matriculaRepository.findByEstudianteIdAndPeriodoActivo(estudianteId);
+                         
+        return todasLasMatriculas.stream()
+                .map(this::toEstudianteMatriculaResponse)
+                .collect(Collectors.toList());
+        
+    }
+
+    /**
+     * Método adicional para obtener una matrícula por ID
+     */
+    public Matricula obtenerMatriculaPorId(Integer matriculaId) {
+        if (matriculaId == null) {
+            throw new IllegalArgumentException("El ID de la matrícula es requerido");
+        }
+        
+        return matriculaRepository.findById(matriculaId)
+                .orElseThrow(() -> new EntityNotFoundException("Matrícula no encontrada con ID: " + matriculaId));
+    }
+
+    /**
+     * Método adicional para listar todas las matrículas con filtros
+     */
+    @Override
+    public List<MatriculaAgrupadaResonse> listarMatriculas(Long periodoId, String estado, Long asignatura, Long estudiante){
+        if (periodoId == null) {
+            throw new IllegalArgumentException("El identificador del periodo es obligatorio");
+        }
+
+        List<MatriculaCurso> matriculasCurso = matriculaRepository.getListMatriculas(periodoId, estado, asignatura, estudiante);
+
+        return matriculasCurso.stream()
+                .map(this::toMatriculaAgrupadaResonse)
+                .toList();   
+            }
+
+
+    
+    
+    /**
+     * Método para obtener estudiantes matriculados en un curso específico
+     */
+     @Override
+    public List<MatriculaCursoResponse> obtenerEstudiantesMatriculadosEnCurso(Integer cursoId) {
+        Optional<Curso> cursoOpt = cursoRepository.findCursoById(cursoId);
+        if(cursoOpt.isEmpty()){
+            throw new EntityNotFoundException("Curso no encontrado con ID: " + cursoId);
+        }
+
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+
+        List<Matricula> matriculas = matriculaRepository.findByCursoIdAndPeriodoId(cursoId, periodoActivo.getId());
+
+        return matriculas.stream()
+                .map(this::toMatriculaCursoResponse)
+                .collect(Collectors.toList());
+    
+    }
+
+
+    @Override
+    public MatriculaResponse cambiarEstadoMatricula(Integer id, MatriculaEstadoRequest request) {
+      
+        Matricula matricula = matriculaRepository.findById(id)
+        .orElseThrow(() -> new EntityNotFoundException("Matrícula no encontrada"));
+
+        if (request.getEstado().equalsIgnoreCase(MatriculaEstado.APROBADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.RECHAZADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.CREADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_AVALADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_NO_AVALADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.CANCELADA.name())) {
+            
+            matricula.setEstadoMatricula(request.getEstado().toUpperCase());
+            if (request.getEstado().equalsIgnoreCase(MatriculaEstado.CANCELADA.name()) ||
+            request.getEstado().equalsIgnoreCase(MatriculaEstado.RECHAZADA.name()) )
+            {
+                matricula.setEstado(false);
+            }
+            matriculaRepository.update(matricula);
+            return modelMapper.map(matricula, MatriculaResponse.class);
+            
+        }else {
+            throw new IllegalArgumentException("Estado de matrícula no válido");
+        }
+
+
+     }
+
+
+    /**
+     * Método auxiliar para validar que el periodo académico esté activo y dentro del plazo de matrícula
+     */
+    private void validarPeriodoMatricula() {
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+        
+        LocalDate fechaActual = LocalDate.now();
+        
+        if (fechaActual.isBefore(periodoActivo.getFechaInicio())) {
+            throw new IllegalArgumentException("El periodo académico aún no ha iniciado");
+        }
+        
+        if (fechaActual.isAfter(periodoActivo.getFechaFinMatricula())) {
+            throw new IllegalArgumentException("El periodo de matrícula ha finalizado");
+        }
+    }
+
+    /**
+     * Método auxiliar para validar que un curso existe y está disponible para matrícula
+     * @param  cursoId
+     */
+    private Curso validarYObtenerCurso(Integer cursoId) {
+        Curso curso = cursoRepository.findCursoById(cursoId)
+                .orElseThrow(() -> new EntityNotFoundException("Curso no encontrado con ID: " + cursoId));
+        
+        // Verificar que el curso pertenezca al periodo activo
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException(msg("periodo.error.noexiste")));
+        
+        if (!curso.getPeriodo().getId().equals(periodoActivo.getId())) {
+            throw new IllegalArgumentException("El curso no pertenece al periodo académico activo");
+        }
+
+        if (!curso.isEstado()) {
+            throw new IllegalArgumentException("El curso no está disponible para matrícula");
+        }
+
+        return curso;
+    }
+
+    /**
+     * Método auxiliar para crear una matrícula
+     */
+    private Matricula crearMatricula(Long estudianteId, Curso curso, String observacion) {
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException("No hay periodo acadÃ©mico activo"));
+        Estudiante estudiante= matriculaRepository.getEstudianteById(estudianteId)
+                .orElseThrow(() -> new EntityNotFoundException("Estudiante no encontrado con ID: " + estudianteId));
+        return Matricula.builder()
+                .estudiante(estudiante)
+                .curso(curso)
+                .periodo(periodoActivo)
+                .estado(true)
+                .estadoMatricula(MatriculaEstado.CREADA.name())
+                .observacion(observacion)
+                .build();
+    }
+
+    /**
+     * Validar prerequisitos de una asignatura para un estudiante antes de la matrÃ­cula.
+     * (Actualmente sÃ³lo valida estado de la asignatura; extender si hay tabla de prerequisitos)
+     */
+    private void validarPrerequisitos(Long estudianteId, Long asignaturaId) {
+        
+        
+        Asignatura asignatura = cursoRepository.findAsignaturaById(asignaturaId)
+                .orElseThrow(() -> new EntityNotFoundException("Asignatura no encontrada"));
+        
+        if (!asignatura.getEstado()) {
+            throw new IllegalArgumentException("La asignatura no está disponible para matrícula");
+        }
+    }
+
+    private Integer obtenerCursoIdPrimerIntento(MatriculaEstudianteCursosRequest solicitud) {
+        if (solicitud.getCursos() == null || solicitud.getCursos().isEmpty()) {
+            return null;
+        }
+        return solicitud.getCursos().get(0).getCursoId();
+    }
+    
+
+    private List<MatriculaResponse> toMatriculaResponse(List<Matricula> matriculas) {
+        return matriculas.stream()
+                .map(matricula -> MatriculaResponse.builder()
+                        .id(matricula.getId())
+                        .estudiante(modelMapper.map(matricula.getEstudiante(), EstudianteResponse.class))
+                        .curso(modelMapper.map(matricula.getCurso(), CursoResponse.class))
+                        .periodo(modelMapper.map(matricula.getPeriodo(), PeriodoAcademicoResponse.class))
+                        .estado(matricula.getEstadoMatricula())
+                        .observacion(matricula.getObservacion())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private MatriculaAgrupadaResonse toMatriculaAgrupadaResonse(MatriculaCurso mCurso){
+        return MatriculaAgrupadaResonse.builder()
+        .idCurso(mCurso.getCurso().getId())
+        .asignatura(mCurso.getCurso().getAsignatura().getNombre())
+        .grupo(mCurso.getCurso().getGrupo())
+        .periodo(modelMapper.map(mCurso.getCurso().getPeriodo(),PeriodoAcademicoResponse.class))
+        .estado(mCurso.getCurso().isEstado()?"ACTIVO":"INACTIVO")
+        .cantidadEstudiante(mCurso.getTotalMatriculas())
+        .build();
+    }
+
+    private EstudianteMatriculaResponse toEstudianteMatriculaResponse(Matricula matricula){
+        return EstudianteMatriculaResponse.builder()
+        .id(matricula.getId())
+        .curso(modelMapper.map(matricula.getCurso(), CursoResponse.class))
+        .estado(matricula.getEstadoMatricula())
+        .observacion(matricula.getObservacion())
+        .build();
+    }
+
+     private MatriculaCursoResponse toMatriculaCursoResponse(Matricula matricula){
+        return MatriculaCursoResponse.builder()
+        .id(matricula.getId())
+        .estudiante(modelMapper.map(matricula.getEstudiante(), EstudianteResponse.class))
+        .estado(matricula.getEstadoMatricula())
+        .observacion(matricula.getObservacion())
+        .build();
+    }
+
+    
+    @Override
+    public List<TutorNotificacionResponse> notificarMatriculasAprobadas(ListEstudianteRequest request) {
+        if (request == null || request.getEstudianteIds() == null || 
+            request.getEstudianteIds().isEmpty()) {
+            throw new IllegalArgumentException("Debe especificar al menos un estudiante para la notificacion");
+        }
+
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException("No hay periodo academico activo"));
+
+        Set<String> correosEnviados = new HashSet<>();
+
+        Set<EstudianteResponse> estudiantesNotificados = new HashSet<>();
+        Set<ReportEstudianteCursoDto> reportesEstudiantes = new HashSet<>();
+        Set<Docente> tutores = new HashSet<>();
+
+        String asunto = "Reporte de Matrícula período "  + periodoActivo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " - " + periodoActivo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy")) ;
+        for (Long estudianteId : request.getEstudianteIds()) {
+            if (estudianteId == null) {
+                continue;
+            }
+
+            Estudiante estudiante = matriculaRepository.getEstudianteById(estudianteId).orElse(null);
+            if (estudiante == null) {
+                LOGGER.warn("Estudiante {} no encontrado, se omite notificacion", estudianteId);
+                continue;
+            }
+            
+            List<Matricula> aprobadas = matriculaRepository.findByEstudianteIdAndPeriodoActivo(estudianteId)
+             .stream()
+                .filter(this::esMatriculaAprobada)
+                .toList();
+
+            if (aprobadas.isEmpty()) {
+                LOGGER.info("Estudiante {} sin matriculas aprobadas en periodo activo", estudianteId);
+                continue;
+            }
+            String correoEstudiante = resolveCorreoEstudiante(estudiante);
+            reportesEstudiantes.add(ReportEstudianteCursoDto.builder()
+                    .codigoEstudiante(estudiante.getCodigo())
+                    .nombreEstudiante(buildNombrePersona(estudiante.getPersona()))
+                    .identificacion(estudiante.getPersona().getIdentificacion().toString())
+                    .semestre(estudiante.getInformacionMaestria().getSemestreAcademico().toString())
+                    .correoEstudiante(correoEstudiante)
+                    .cursos(aprobadas.stream()
+                            .map(this::toReportCursoDto)
+                            .toList())
+                    .totalMatricula(String.valueOf(aprobadas.size()))
+                    .build());
+
+            estudiantesNotificados.add(modelMapper.map(estudiante, EstudianteResponse.class));
+            List<Docente> tutoresEstudiante = estudianteDocenteRepository.findTutoresByEstudiante(estudianteId);
+            tutores.addAll(tutoresEstudiante);
+
+            byte[] reporte = generarReporteMatriculaEstudiante(estudiante, aprobadas, periodoActivo);
+            int totalAprobadas = aprobadas.size();
+        
+            if (correoEstudiante != null && !correoEstudiante.isBlank()) {
+                String normalized = correoEstudiante.trim().toLowerCase();
+                if (correosEnviados.add(normalized)) {
+                    String cuerpo = emailService.buildCorreoHtml("Reporte de Matrícula", buildCuerpoCorreoEstudiante(estudiante, periodoActivo, totalAprobadas));
+                    sendEmailWithAttachmentSafe(correoEstudiante, asunto, cuerpo, reporte,
+                            buildNombreArchivoReporte(estudiante), "application/pdf");
+                }
+            } else {
+                LOGGER.warn("Estudiante {} sin correo, se omite notificacion", estudianteId);
+           }         
+
+        }
+        return  notificarTutor(reportesEstudiantes, periodoActivo, tutores,estudiantesNotificados);
+    }
+
+     @Override
+    public List<MatriculaResponse> cambiarEstadoMasivoMatricula(CambioEstadoMasivoRequest request) {
+
+        List<Matricula> matriculasActualizadas = new ArrayList<>();
+        List<Matricula> matriculasList = new ArrayList<>();
+        if (request == null || request.getEstudiantesIds() == null || request.getEstudiantesIds().isEmpty()) {
+            throw new IllegalArgumentException("Debe especificar al menos una matrícula para el cambio de estado masivo");
+        }
+        if (request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.APROBADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.RECHAZADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.CREADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_AVALADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_NO_AVALADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.CANCELADA.name())
+            || request.getNuevoEstado().equalsIgnoreCase("APROBAR_TUTOR_AVALADA")
+        ) {
+            
+            for (Long estudianteId : request.getEstudiantesIds()) {
+                List<Matricula> matriculas = matriculaRepository.findByEstudianteIdAndPeriodoActivo(estudianteId);
+                matriculasList.addAll(matriculas);
+            }
+            for (Matricula matricula : matriculasList) {
+                if (request.getNuevoEstado().equalsIgnoreCase("APROBAR_TUTOR_AVALADA")) {
+                    matricula.setEstadoMatricula(MatriculaEstado.APROBADA.name());
+                    if (matricula.getEstadoMatricula().equalsIgnoreCase(MatriculaEstado.TUTOR_NO_AVALADA.name())) {
+                        matricula.setEstadoMatricula(MatriculaEstado.RECHAZADA.name());    
+                        matricula.setEstado(false);
+                    }
+                } else{
+                    if ((matricula.getEstadoMatricula().equalsIgnoreCase(MatriculaEstado.APROBADA.name())||
+                        matricula.getEstadoMatricula().equalsIgnoreCase(MatriculaEstado.RECHAZADA.name())) &&
+                        (request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_AVALADA.name())||
+                        request.getNuevoEstado().equalsIgnoreCase(MatriculaEstado.TUTOR_NO_AVALADA.name()))) {
+                        throw new IllegalArgumentException("No se puede cambiar el estado de una matrícula que ya está APROBADA o RECHAZADA por el  Coordinador");
+                        
+                    }
+                    MatriculaEstado nuevoEstado = MatriculaEstado.valueOf(request.getNuevoEstado().toUpperCase());
+                    matricula.setEstadoMatricula(nuevoEstado.name());                    
+                }
+
+                if (matricula.getEstadoMatricula().equalsIgnoreCase(MatriculaEstado.RECHAZADA.name())
+                || matricula.getEstadoMatricula().equalsIgnoreCase(MatriculaEstado.CANCELADA.name())) {
+                    matricula.setEstado(false);                  
+                }
+                matriculasActualizadas.add(matriculaRepository.update(matricula));
+            }
+  
+        }else {
+            throw new IllegalArgumentException("Estado de matrícula no válido para el cambio masivo"); 
+        }
+        return toMatriculaResponse(matriculasActualizadas);
+    }
+
+    @Override
+    public List<TutorNotificacionResponse> notificarMatriculasFinalCursos(ListCursosRequest request) {
+
+        if (request == null || request.getCursoIds() == null ||request.getCursoIds().isEmpty()) {
+                throw new IllegalArgumentException("Debe especificar al menos un curso para la notificacion");
+        }
+
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException("No hay periodo academico activo"));
+
+        Set<String> correosEnviados = new HashSet<>();
+        Set<Matricula> matriculasList = new HashSet<>();
+  
+        Set<EstudianteResponse> estudiantesNotificados = new HashSet<>();
+        Set<ReportEstudianteCursoDto> reportesEstudiantes = new HashSet<>();
+        Set<Docente> tutores = new HashSet<>();
+
+        String asunto = "Reporte de Matriculas  periodo "
+                + periodoActivo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy"))
+                + " - "
+                + periodoActivo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy"));
+
+        for (Integer cursoId : request.getCursoIds()) {
+            if (cursoId == null) {
+                continue;
+            }
+
+            if (cursoRepository.findCursoById(cursoId).isEmpty()) {
+                LOGGER.warn("Curso {} no encontrado, se omite notificacion", cursoId);
+                continue;
+            }
+
+            List<Matricula> matriculas = matriculaRepository.findByCursoIdAndPeriodoId(cursoId, periodoActivo.getId()).stream()
+                    .filter(this::esMatriculaAprobada)
+                    .toList();
+
+            matriculasList.addAll(matriculas);
+        }
+
+        Set<Estudiante> estudianteIds = matriculasList.stream()
+                .map(matricula -> matricula.getEstudiante())
+                .collect(Collectors.toSet());
+
+        for (Estudiante estudiante : estudianteIds) {
+            if (estudiante == null)
+                 {
+                continue;
+            }
+
+            List<Matricula> aprobadas= matriculaRepository.findByEstudianteIdAndPeriodoActivo(estudiante.getId()).stream()
+            .filter(m -> request.getCursoIds().contains(m.getCurso().getId()) && esMatriculaAprobada(m))
+            .toList();
+
+            if (aprobadas.isEmpty()) {
+                LOGGER.info("Estudiante {} sin matriculas aprobadas en periodo activo", estudiante.getId());
+                continue;
+            } 
+
+            String correoEstudiante = resolveCorreoEstudiante(estudiante);
+
+            reportesEstudiantes.add( ReportEstudianteCursoDto.builder()
+                    .codigoEstudiante(estudiante.getCodigo())
+                    .nombreEstudiante(buildNombrePersona(estudiante.getPersona()))
+                    .identificacion(estudiante.getPersona().getIdentificacion().toString())
+                    .semestre(estudiante.getInformacionMaestria().getSemestreAcademico().toString())
+                    .correoEstudiante(correoEstudiante)
+                    .cursos(aprobadas.stream()
+                            .map(this::toReportCursoDto)
+                            .toList())
+                    .totalMatricula(String.valueOf(aprobadas.size()))
+                    .build()
+                );
+            
+            estudiantesNotificados.add(modelMapper.map(estudiante, EstudianteResponse.class));
+            tutores.addAll(estudianteDocenteRepository.findTutoresByEstudiante(estudiante.getId()));
+           
+            byte[] reporte = generarReporteMatriculaEstudiante(estudiante, aprobadas, periodoActivo);
+            int totalAprobadas = aprobadas.size();
+
+            if (correoEstudiante != null && !correoEstudiante.isBlank()) {
+                String normalized = correoEstudiante.trim().toLowerCase();
+                if (correosEnviados.add(normalized)) {
+                    String cuerpo = emailService.buildCorreoHtml("Reporte de Matrícula", buildCuerpoCorreoEstudiante(estudiante, periodoActivo, totalAprobadas));
+                    sendEmailWithAttachmentSafe(correoEstudiante, asunto, cuerpo, reporte,
+                            buildNombreArchivoReporte(estudiante), "application/pdf");
+                }
+            } else {
+                LOGGER.warn("Estudiante {} sin correo, se omite notificacion", estudiante.getId());
+           }        
+        }
+
+        return  notificarTutor(reportesEstudiantes, periodoActivo, tutores,estudiantesNotificados);
+    
+    }
+
+
+
+    private List<TutorNotificacionResponse> notificarTutor(Set<ReportEstudianteCursoDto> reportesEstudiantes,
+        PeriodoAcademico periodoActivo, Set<Docente> tutores,Set<EstudianteResponse> estudiantesNotificados)
+    {
+        String asunto = "Reporte de Matrícula período "  + periodoActivo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " - " + periodoActivo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy")) ;
+        Set<String> correosEnviados = new HashSet<>();
+        List<TutorNotificacionResponse> notificaciones = new ArrayList<>();
+
+        for (Docente tutor : tutores) {
+            String correoTutor = resolveCorreoDocente(tutor);
+            if (correoTutor == null || correoTutor.isBlank()) {
+                LOGGER.warn("Tutor {} sin correo, se omite notificacion", tutor != null ? tutor.getId() : null);
+                continue;
+            }
+            String normalized = correoTutor.trim().toLowerCase();
+            if (!correosEnviados.add(normalized)) {
+                continue;
+            }
+            String cuerpo = emailService.buildCorreoHtml("Reporte de Matrícula", buildCuerpoCorreoTutor(tutor, periodoActivo));
+            List<ReportEstudianteCursoDto> estudiantesDelTutor = reportesEstudiantes.stream()
+                    .filter(reporte -> estudianteDocenteRepository.isTutorDeEstudiante(tutor.getId(), reporte.getCodigoEstudiante()))
+                    .toList();
+            byte[] reporte = generarReporteMatriculaTutor(tutor,estudiantesDelTutor,periodoActivo);
+            sendEmailWithAttachmentSafe(correoTutor, asunto, cuerpo, reporte,"Reporte_matricula.pdf", "application/pdf");
+
+             List<EstudianteResponse> estudiantesResult = estudiantesNotificados.stream()
+                    .filter(estudiante -> estudianteDocenteRepository.isTutorDeEstudiante(tutor.getId(), estudiante.getCodigo()))
+                    .toList();
+
+            notificaciones.add(TutorNotificacionResponse.builder()
+                    .tutorId(tutor.getId())
+                    .nombre(buildNombrePersona(tutor.getPersona()))
+                    .codigo(tutor.getCodigo())
+                    .correo(correoTutor)
+                    .estudiantes(estudiantesResult)
+                    .totalEstudiantesConMatriculaActiva(estudiantesResult.size())
+                    .build());
+        }
+        return notificaciones;
+    }
+    private boolean esMatriculaAprobada(Matricula matricula) {
+        return matricula != null
+                && matricula.getEstadoMatricula() != null
+                && MatriculaEstado.APROBADA.name().equalsIgnoreCase(matricula.getEstadoMatricula());
+    }
+
+    private void sendEmailWithAttachmentSafe(String to, String subject, String body, byte[] attachment,
+            String attachmentName, String contentType) {
+        try {
+            emailService.sendEmailWithAttachment(to, subject, body, attachment, attachmentName, contentType)
+                    .exceptionally(ex -> {
+                        LOGGER.error("Error enviando correo a {}", to, ex);
+                        return null;
+                    });
+        } catch (Exception ex) {
+            LOGGER.error("Error enviando correo a {}", to, ex);
+        }
+    }
+
+    private byte[] generarReporteMatriculaEstudiante(Estudiante estudiante, List<Matricula> matriculas, PeriodoAcademico periodo) {
+        List<ReportCursoDto> data = matriculas.stream()
+                .map(this::toReportCursoDto)
+                .toList();
+        try (InputStream reportStream = getClass().getResourceAsStream("/Reportes/Matricula.jasper");
+             InputStream logoStream = getClass().getResourceAsStream("/image/logo-unicauca.png")) {
+            if (reportStream == null) {
+                throw new IllegalArgumentException("No se encontro el reporte Matricula.jasper");
+            }
+            if (logoStream == null) {
+                throw new IllegalArgumentException("No se encontro el logo para el reporte");
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("logoUnicauca", new BufferedInputStream(logoStream));
+            params.put("fecha_periodo", periodo.getFechaInicio() + " - " + periodo.getFechaFin());
+            params.put("codigo", estudiante.getCodigo() != null ? estudiante.getCodigo() : "");
+            params.put("identificacion", resolveIdentificacion(estudiante));
+            params.put("nombre_estudiante", buildNombrePersona(estudiante.getPersona()));
+            params.put("semestre", resolveSemestre(estudiante));
+            params.put("ds", new JRBeanArrayDataSource(data.toArray()));
+            JasperPrint print = JasperFillManager.fillReport(reportStream, params,
+                    new JRBeanArrayDataSource(data.toArray()));
+            return JasperExportManager.exportReportToPdf(print);
+        } catch (JRException e) {
+            throw new IllegalStateException("Error generando el reporte de matricula", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudo generar el reporte de matricula", e);
+        }
+    }
+
+    private byte[] generarReporteMatriculaTutor(Docente tutor,List<ReportEstudianteCursoDto> estudiantes, PeriodoAcademico periodo) {
+       
+        try (InputStream reportStream = getClass().getResourceAsStream("/Reportes/matriculaTutor.jasper");
+             InputStream logoStream = getClass().getResourceAsStream("/image/logo-unicauca.png")) {
+            if (reportStream == null) {
+                throw new IllegalArgumentException("No se encontro el reporte matriculaTutor.jasper");
+            }
+            if (logoStream == null) {
+                throw new IllegalArgumentException("No se encontro el logo para el reporte");
+            }
+            Map<String, Object> params = new HashMap<>();
+            params.put("logoUnicauca", new BufferedInputStream(logoStream));
+            params.put("fecha_periodo", periodo.getFechaInicio() + " - " + periodo.getFechaFin());
+            params.put("codigo_tutor", tutor.getCodigo() != null ? tutor.getCodigo() : "");
+            params.put("correo_tutor", tutor.getPersona() != null && tutor.getPersona().getCorreoElectronico() != null
+                    ? tutor.getPersona().getCorreoElectronico()
+                    : "");
+            params.put("nombre_tutor", buildNombrePersona(tutor.getPersona()));
+            params.put("dsResumenEstudiantes", new JRBeanCollectionDataSource(estudiantes));
+            JRBeanCollectionDataSource mainDs = new JRBeanCollectionDataSource(estudiantes);
+            JasperPrint print = JasperFillManager.fillReport(reportStream, params,
+                    mainDs);
+            return JasperExportManager.exportReportToPdf(print);
+        } catch (JRException e) {
+            throw new IllegalStateException("Error generando el reporte de matricula", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudo generar el reporte de matricula", e);
+        }
+    }
+
+    private ReportCursoDto toReportCursoDto(Matricula matricula) {
+        Curso curso = matricula != null ? matricula.getCurso() : null;
+        return ReportCursoDto.builder()
+                .grupo(curso != null && curso.getGrupo() != null ? curso.getGrupo() : "")
+                .asignatura(curso != null && curso.getAsignatura() != null && curso.getAsignatura().getNombre() != null
+                        ? curso.getAsignatura().getNombre()
+                        : "")
+                .docentes(curso != null ? formatDocentes(curso.getDocentes()) : "")
+                .horario(curso != null && curso.getHorario() != null ? curso.getHorario() : "")
+                .salon(curso != null && curso.getSalon() != null ? curso.getSalon() : "")
+                .creditos(curso != null && curso.getAsignatura() != null && curso.getAsignatura().getCreditos() != null
+                        ? curso.getAsignatura().getCreditos().toString()
+                        : "")
+                .build();
+    }
+
+    private String formatDocentes(List<Docente> docentes) {
+        if (docentes == null || docentes.isEmpty()) {
+            return "Sin docentes";
+        }
+        return docentes.stream()
+                .map(this::formatDocenteNombre)
+                .collect(Collectors.joining(", "));
+    }
+
+    private String formatDocenteNombre(Docente docente) {
+        if (docente == null) {
+            return "";
+        }
+        if (docente.getPersona() == null) {
+            return docente.getCodigo() != null ? docente.getCodigo() : "";
+        }
+        String nombre = docente.getPersona().getNombre() != null ? docente.getPersona().getNombre() : "";
+        String apellido = docente.getPersona().getApellido() != null ? docente.getPersona().getApellido() : "";
+        String full = (nombre + " " + apellido).trim();
+        return full.isEmpty() ? (docente.getCodigo() != null ? docente.getCodigo() : "") : full;
+    }
+
+    private String resolveCorreoEstudiante(Estudiante estudiante) {
+        if (estudiante == null) {
+            return null;
+        }
+        if (estudiante.getCorreoUniversidad() != null && !estudiante.getCorreoUniversidad().isBlank()) {
+            return estudiante.getCorreoUniversidad();
+        }
+        if (estudiante.getPersona() != null && estudiante.getPersona().getCorreoElectronico() != null
+                && !estudiante.getPersona().getCorreoElectronico().isBlank()) {
+            return estudiante.getPersona().getCorreoElectronico();
+        }
+        return null;
+    }
+
+    private String resolveCorreoDocente(Docente docente) {
+        if (docente == null || docente.getPersona() == null) {
+            return null;
+        }
+        return docente.getPersona().getCorreoElectronico();
+    }
+
+    private String buildCuerpoCorreoEstudiante(Estudiante estudiante, PeriodoAcademico periodo, int totalAprobadas) {
+        String nombre = buildNombrePersona(estudiante.getPersona());
+        String saludo = nombre.isEmpty() ? "Cordial saludo," : "Cordial saludo, " + nombre + ".";
+        String cuerpo = "<p>" + saludo + "</p>"
+        + "<p>Te informamos que tu matrícula correspondiente al periodo "
+        + periodo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " - " + periodo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " ha sido procesada exitosamente.</p>"
+        + "<p>Adjuntamos el reporte con las materias matriculadas para dicho periodo.</p>"
+        + "<p>Atentamente,</p>"
+                + "<p><strong>Maestría en Computación</strong></p>";
+        return cuerpo;
+    }
+
+    private String buildCuerpoCorreoEstudianteCursos(Estudiante estudiante, PeriodoAcademico periodo, int totalCursos) {
+        String nombre = buildNombrePersona(estudiante.getPersona());
+        String saludo = nombre.isEmpty() ? "Cordial saludo," : "Cordial saludo, " + nombre + ".";
+        String cuerpo = "<p>" + saludo + "</p>"
+                + "<p>Te compartimos el reporte de matricula asociado a los cursos seleccionados del periodo "
+                + periodo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " - "
+                + periodo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + ".</p>"
+                + "<p>El reporte incluye <strong>" + totalCursos + "</strong> cursos.</p>"
+                + "<p>Atentamente,</p>"
+                + "<p><strong>Maestria en Computacion</strong></p>";
+        return cuerpo;
+    }
+
+
+    private String buildCuerpoCorreoTutor(Docente tutor, PeriodoAcademico periodo) {
+        String nombreTutor = buildNombrePersona(tutor != null ? tutor.getPersona() : null);
+        String saludo = nombreTutor.isEmpty() ? "Cordial saludo," : "Cordial saludo, " + nombreTutor + ".";
+        String cuerpo = "<p>" + saludo + "</p>"
+                + "<p>Se informa sobre las matrículas de los estudiantes a tu cargo .</p>"
+                + "<p>Adjuntamos el reporte  de los estudiantes y sus matriculas en el periodo "
+                 + periodo.getFechaInicio().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " - " + periodo.getFechaFin().format(DateTimeFormatter.ofPattern("dd/MM/yy")) + " </p>"
+                + "<p>Atentamente,</p>"
+                + "<p><strong>Maestría en Computación</strong></p>";
+        return  cuerpo;
+    }
+
+
+
+   
+
+    private String buildNombrePersona(Persona persona) {
+        if (persona == null) {
+            return "";
+        }
+        String nombre = persona.getNombre() != null ? persona.getNombre() : "";
+        String apellido = persona.getApellido() != null ? persona.getApellido() : "";
+        return (nombre + " " + apellido).trim();
+    }
+
+    private String resolveIdentificacion(Estudiante estudiante) {
+        if (estudiante == null || estudiante.getPersona() == null || estudiante.getPersona().getIdentificacion() == null) {
+            return "";
+        }
+        return estudiante.getPersona().getIdentificacion().toString();
+    }
+
+    private String resolveSemestre(Estudiante estudiante) {
+        if (estudiante == null || estudiante.getInformacionMaestria() == null) {
+            return "";
+        }
+        Integer semestre = estudiante.getInformacionMaestria().getSemestreAcademico();
+        if (semestre == null) {
+            semestre = estudiante.getInformacionMaestria().getSemestreFinanciero();
+        }
+        return semestre != null ? semestre.toString() : "";
+    }
+
+    private String buildNombreArchivoReporte(Estudiante estudiante) {
+        String codigo = estudiante != null && estudiante.getCodigo() != null ? estudiante.getCodigo() : "estudiante";
+        return "reporte_matricula_" + codigo + ".pdf";
+    }
+
+    @Override
+    public byte[] generarReporteMatricula(String formato) {
+        PeriodoAcademico periodoActivo = periodoAcademicoRepository.findPeriodoActivo()
+                .orElseThrow(() -> new IllegalArgumentException("No hay periodo academico activo"));
+
+        List<Map<String, Object>> cursosData = buildCursosReporteData(periodoActivo);
+        if (cursosData.isEmpty()) {
+            throw new IllegalArgumentException("No hay matriculas aprobadas");
+        }
+
+        try (InputStream reportStream = getClass().getResourceAsStream("/Reportes/matriculaReport.jasper");
+             InputStream logoStream = getClass().getResourceAsStream("/image/logo-unicauca.png")) {
+            if (reportStream == null) {
+                throw new IllegalArgumentException("No se encontro el reporte matriculaReport.jasper");
+            }
+            if (logoStream == null) {
+                throw new IllegalArgumentException("No se encontro el logo para el reporte");
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("logoUnicauca", new BufferedInputStream(logoStream));
+            params.put("tag_periodo", String.valueOf(periodoActivo.getTagPeriodo()));
+            params.put("fecha_inicio", formatFecha(periodoActivo.getFechaInicio()));
+            params.put("fecha_matricula", formatFecha(periodoActivo.getFechaFinMatricula()));
+            params.put("fecha_fin", formatFecha(periodoActivo.getFechaFin()));
+            params.put("descripcion_periodo", safeValue(periodoActivo.getDescripcion()));
+            params.put("dsResumenCursos", new JRBeanCollectionDataSource(cursosData));
+
+            JRBeanCollectionDataSource mainDs = new JRBeanCollectionDataSource(cursosData);
+            JasperPrint print = JasperFillManager.fillReport(reportStream, params, mainDs);
+
+            if (isExcelFormat(formato)) {
+                return exportXlsx(print);
+            }
+            return JasperExportManager.exportReportToPdf(print);
+        } catch (JRException e) {
+            throw new IllegalStateException("Error generando el reporte de matricula", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudo generar el reporte de matricula", e);
+        }
+    }
+
+    private List<Map<String, Object>> buildCursosReporteData(PeriodoAcademico periodo) {
+        List<Curso> cursos = cursoRepository.findAllCursos(null, null, periodo.getId()).stream()
+                .filter(Curso::isEstado)
+                .toList();
+
+        List<Map<String, Object>> data = new ArrayList<>();
+        for (Curso curso : cursos) {
+            List<Matricula> aprobadas = matriculaRepository.findByCursoIdAndPeriodoId(curso.getId(), periodo.getId())
+                    .stream()
+                    .filter(this::esMatriculaAprobada)
+                    .toList();
+            if (aprobadas.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> cursoMap = new HashMap<>();
+            cursoMap.put("grupo", safeValue(curso.getGrupo()));
+            cursoMap.put("asignatura", curso.getAsignatura() != null ? safeValue(curso.getAsignatura().getNombre()) : "");
+            cursoMap.put("docentes", formatDocentes(curso.getDocentes()));
+            cursoMap.put("horario", safeValue(curso.getHorario()));
+            cursoMap.put("salon", safeValue(curso.getSalon()));
+            cursoMap.put("creditos", curso.getAsignatura() != null && curso.getAsignatura().getCreditos() != null
+                    ? curso.getAsignatura().getCreditos().toString()
+                    : "");
+            cursoMap.put("estudiantes", buildEstudiantesReporteData(aprobadas));
+            data.add(cursoMap);
+        }
+        return data;
+    }
+
+    private List<Map<String, Object>> buildEstudiantesReporteData(List<Matricula> matriculas) {
+        if (matriculas == null || matriculas.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> data = new ArrayList<>();
+        for (Matricula matricula : matriculas) {
+            Estudiante estudiante = matricula != null ? matricula.getEstudiante() : null;
+            Map<String, Object> estMap = new HashMap<>();
+            estMap.put("codigoEstudiante", estudiante != null && estudiante.getCodigo() != null ? estudiante.getCodigo() : "");
+            estMap.put("nombreEstudiante", buildNombrePersona(estudiante != null ? estudiante.getPersona() : null));
+            estMap.put("identificacion", resolveIdentificacion(estudiante));
+            estMap.put("correoEstudiante", safeValue(resolveCorreoEstudiante(estudiante)));
+            estMap.put("semestre", resolveSemestre(estudiante));
+            estMap.put("Observación", safeValue(matricula != null ? matricula.getObservacion() : ""));
+            data.add(estMap);
+        }
+        return data;
+    }
+
+    private String safeValue(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String formatFecha(LocalDate fecha) {
+        return fecha != null ? fecha.format(DateTimeFormatter.ofPattern("dd/MM/yy")) : "";
+    }
+
+    private boolean isExcelFormat(String formato) {
+        if (formato == null) {
+            return false;
+        }
+        String normalized = formato.trim().toLowerCase();
+        return normalized.equals("xlsx") || normalized.equals("excel");
+    }
+
+    private byte[] exportXlsx(JasperPrint print) throws JRException {
+        JRXlsxExporter exporter = new JRXlsxExporter();
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        exporter.setExporterInput(new SimpleExporterInput(print));
+        exporter.setExporterOutput(new SimpleOutputStreamExporterOutput(outputStream));
+        SimpleXlsxReportConfiguration configuration = new SimpleXlsxReportConfiguration();
+        configuration.setDetectCellType(true);
+        configuration.setCollapseRowSpan(false);
+        exporter.setConfiguration(configuration);
+        exporter.exportReport();
+        return outputStream.toByteArray();
+    }
+
+   
+
+    
+    
+}
