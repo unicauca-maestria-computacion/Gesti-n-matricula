@@ -12,6 +12,8 @@ import org.springframework.context.MessageSource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import unicauca.edu.co.ms_gestion_maticula.domain.enums.PeriodoEstadoEnum;
 import unicauca.edu.co.ms_gestion_maticula.domain.model.Curso;
@@ -34,8 +36,11 @@ public class PeriodoAcademicoServiceImpl implements PeriodoAcademicoService {
     @Autowired
     private final CursoRepository cursoRepository;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     @Qualifier("messageResourceMatricula")
-	MessageSource messageSource;    
+	MessageSource messageSource;
 
     @Override
     @Transactional
@@ -77,6 +82,7 @@ public class PeriodoAcademicoServiceImpl implements PeriodoAcademicoService {
     }
 
     @Override
+    @Transactional
     public void eliminar(Long id) {
         PeriodoAcademico periodo = repository.findById(id)
             .orElseThrow(() -> new IllegalArgumentException("Periodo no encontrado"));
@@ -84,8 +90,40 @@ public class PeriodoAcademicoServiceImpl implements PeriodoAcademicoService {
         if (cursosPeriodo.size()>0) {
             throw new IllegalArgumentException("No se puede eliminar el período porque tiene cursos asignados.");
         }
-        
+
+        if ("PROYECCION".equalsIgnoreCase(periodo.getEstado())) {
+            // Los periodos de proyeccion no tienen cursos/matriculas academicas reales,
+            // pero periodo_academico es una tabla compartida con el modulo de informacion
+            // presupuestaria (misma BD): proyeccion_estudiante, configuracion_reporte_financiero
+            // y configuracion_reporte_grupos referencian este id por FK. Sin limpiarlas antes,
+            // el DELETE choca contra esas restricciones y falla con un 500 generico.
+            limpiarDependenciasProyeccion(id);
+        }
+
         repository.deleteById(id);
+    }
+
+    private void limpiarDependenciasProyeccion(Long periodoId) {
+        entityManager.createNativeQuery(
+                "DELETE FROM proyeccion_estudiante WHERE periodo_academico_id = :id")
+            .setParameter("id", periodoId).executeUpdate();
+        entityManager.createNativeQuery(
+                "DELETE FROM matricula_financiera WHERE periodo_id = :id")
+            .setParameter("id", periodoId).executeUpdate();
+        entityManager.createNativeQuery(
+                "DELETE FROM participacion_grupo WHERE configuracion_reporte_grupos_id IN "
+                    + "(SELECT id FROM configuracion_reporte_grupos WHERE periodo_academico_id = :id)")
+            .setParameter("id", periodoId).executeUpdate();
+        entityManager.createNativeQuery(
+                "DELETE FROM gasto_general WHERE configuracion_reporte_grupos_id IN "
+                    + "(SELECT id FROM configuracion_reporte_grupos WHERE periodo_academico_id = :id)")
+            .setParameter("id", periodoId).executeUpdate();
+        entityManager.createNativeQuery(
+                "DELETE FROM configuracion_reporte_grupos WHERE periodo_academico_id = :id")
+            .setParameter("id", periodoId).executeUpdate();
+        entityManager.createNativeQuery(
+                "DELETE FROM configuracion_reporte_financiero WHERE periodo_academico_id = :id")
+            .setParameter("id", periodoId).executeUpdate();
     }
 
     @Override
